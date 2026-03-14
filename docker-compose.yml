@@ -1,0 +1,109 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: reroute
+      POSTGRES_USER: reroute
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-changeme}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reroute"]
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql+asyncpg://reroute:${PG_PASSWORD:-changeme}@postgres/reroute
+      REDIS_URL: redis://redis:6379
+      RESEND_KEY: ${RESEND_KEY:-}
+    ports:
+      - "8000:8000"
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql+asyncpg://reroute:${PG_PASSWORD:-changeme}@postgres/reroute
+      REDIS_URL: redis://redis:6379
+    command: python worker.py
+
+  docuseal:
+    image: docuseal/docuseal:latest
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql://reroute:${PG_PASSWORD:-changeme}@postgres/reroute
+      SECRET_KEY_BASE: ${DOCUSEAL_SECRET:-changeme}
+    volumes:
+      - docuseal_data:/data
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prom_data:/prometheus
+    command: >
+      --config.file=/etc/prometheus/prometheus.yml
+      --storage.tsdb.retention.time=30d
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+
+volumes:
+  pg_data:
+  redis_data:
+  docuseal_data:
+  prom_data:
+  grafana_data:
+  caddy_data:
