@@ -1,3 +1,5 @@
+# Local Development Docker Compose
+# For production deployment, see fly.toml
 version: "3.9"
 
 services:
@@ -10,6 +12,8 @@ services:
       POSTGRES_PASSWORD: ${PG_PASSWORD:-changeme}
     volumes:
       - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U reroute"]
       interval: 10s
@@ -25,24 +29,11 @@ services:
       --appendonly yes
     volumes:
       - redis_data:/data
-
-  api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    environment:
-      DATABASE_URL: postgresql+asyncpg://reroute:${PG_PASSWORD:-changeme}@postgres/reroute
-      REDIS_URL: redis://redis:6379
-      RESEND_KEY: ${RESEND_KEY:-}
     ports:
-      - "8000:8000"
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+      - "6379:6379"
+
+  # Run API from host for development (hot reload)
+  # cd backend && source venv/bin/activate && uvicorn main:app --reload
 
   worker:
     build:
@@ -57,22 +48,25 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://reroute:${PG_PASSWORD:-changeme}@postgres/reroute
       REDIS_URL: redis://redis:6379
+      OPENSKY_CLIENT_ID: ${OPENSKY_CLIENT_ID:-}
+      OPENSKY_CLIENT_SECRET: ${OPENSKY_CLIENT_SECRET:-}
     command: python worker.py
 
-  docuseal:
-    image: docuseal/docuseal:latest
-    restart: unless-stopped
-    depends_on:
-      - postgres
-    environment:
-      DATABASE_URL: postgresql://reroute:${PG_PASSWORD:-changeme}@postgres/reroute
-      SECRET_KEY_BASE: ${DOCUSEAL_SECRET:-changeme}
-    volumes:
-      - docuseal_data:/data
+  # Optional: DocuSeal for e-signatures (uncomment to enable)
+  # docuseal:
+  #   image: docuseal/docuseal:latest
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     DATABASE_URL: postgresql://reroute:${PG_PASSWORD:-changeme}@postgres/reroute
+  #     SECRET_KEY_BASE: ${DOCUSEAL_SECRET:-changeme}
 
   prometheus:
     image: prom/prometheus:latest
     restart: unless-stopped
+    ports:
+      - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prom_data:/prometheus
@@ -83,27 +77,16 @@ services:
   grafana:
     image: grafana/grafana:latest
     restart: unless-stopped
-    depends_on:
-      - prometheus
+    ports:
+      - "3001:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: http://localhost:3001
     volumes:
       - grafana_data:/var/lib/grafana
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
 
 volumes:
   pg_data:
   redis_data:
-  docuseal_data:
   prom_data:
   grafana_data:
-  caddy_data:
