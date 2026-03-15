@@ -1,135 +1,125 @@
-# Fly.io Deployment Guide
+# Oracle Cloud Deployment Guide
 
-This guide covers deploying Reroute to Fly.io for production.
+This guide covers deploying Reroute to Oracle Cloud Infrastructure (OCI).
 
 ---
 
-## Why Fly.io?
+## Why Oracle Cloud?
 
-- **$5/month free credit** - forever (not a trial)
-- **Real VMs** - containers stay running 24/7
-- **No credit card required** - just email verification
-- **3 VMs** on free tier (256MB RAM each)
-- **Global CDN** - deploy close to your users
+- **Always Free** - permanent free tier (not a trial)
+- **4 Ampere cores + 24GB RAM** - powerful!
+- **200GB block storage** - ample for PostgreSQL
+- **10TB outbound bandwidth** - plenty for a startup
+- **Permanent free IP** - static public IP included
 
 ---
 
 ## Prerequisites
 
-1. Install flyctl:
-   ```bash
-   brew install flyctl
-   ```
-
-2. Sign up:
-   ```bash
-   fly auth signup
-   ```
-   (Use GitHub or email - no credit card needed)
+1. **Oracle Cloud Account** - Sign up at https://oracle.com/cloud/free/
+2. **Credit Card** - Required for identity verification (not charged)
 
 ---
 
 ## Quick Deploy
 
-### Step 1: Clone and Setup
+### Step 1: Create Compute Instance
+
+1. Login to https://cloud.oracle.com/
+2. Go to **OCI** → **Compute** → **Instances**
+3. Click **Create Instance**
+4. Configure:
+   - Name: `reroute`
+   - Image: `Oracle Linux 8` or `Ubuntu 22.04`
+   - Shape: **Ampere** (always free)
+   - Add SSH key (or generate one)
+5. Click **Create**
+
+### Step 2: SSH into Server
 
 ```bash
+# Connect to your instance
+ssh opc@YOUR_PUBLIC_IP
+```
+
+### Step 3: Install Docker
+
+```bash
+# Update and install Docker
+sudo yum update -y
+sudo yum install -y docker
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo usermod -aG docker opc
+
+# Log out and back in for group changes
+exit
+ssh opc@YOUR_PUBLIC_IP
+```
+
+### Step 4: Clone and Configure
+
+```bash
+# Clone repository
 git clone https://github.com/officialaritro/airplane-agent.git
 cd airplane-agent
+
+# Copy env file
+cp backend/.env.example backend/.env
+
+# Edit with your API keys
+nano backend/.env
 ```
 
-### Step 2: Create the App
+Add your values:
+```bash
+OPENSKY_CLIENT_ID=your_client_id
+OPENSKY_CLIENT_SECRET=your_client_secret
+RESEND_KEY=re_xxxxxxxxxxxx
+PG_PASSWORD=your_secure_password
+```
+
+### Step 5: Deploy
 
 ```bash
-fly launch
+# Start all services
+docker-compose up -d
+
+# Check status
+docker-compose ps
 ```
 
-- App name: `reroute`
-- Region: `lhr` (London) or closest to you
-- PostgreSQL: Yes (create managed database)
-- Redis: Yes (create managed database)
+### Step 6: Access the App
 
-### Step 3: Set Secrets
-
-```bash
-# OpenSky credentials
-fly secrets set OPENSKY_CLIENT_ID=your_client_id
-fly secrets set OPENSKY_CLIENT_SECRET=your_client_secret
-
-# Resend (email)
-fly secrets set RESEND_KEY=re_xxxxxxxxxxxx
-
-# DocuSeal secret
-fly secrets set DOCUSEAL_SECRET=$(openssl rand -base64 32)
-```
-
-### Step 4: Deploy
-
-```bash
-fly deploy
-```
+- API: `http://YOUR_PUBLIC_IP:8000`
+- Frontend: Build separately and deploy to Vercel
 
 ---
 
-## Managed Databases
+## Services Running
 
-Fly.io creates managed PostgreSQL and Redis. Connection strings are automatically available as `DATABASE_URL` and `FLY_REDIS_URL` secrets.
-
-### Connect to PostgreSQL locally
-
-```bash
-fly postgres connect -a reroute
-```
-
-### View Redis
-
-```bash
-fly redis connect -a reroute
-```
+| Service | Port | URL |
+|---------|------|-----|
+| API | 8000 | http://YOUR_IP:8000 |
+| PostgreSQL | 5432 | Internal |
+| Redis | 6379 | Internal |
+| Worker | - | Background |
+| Prometheus | 9090 | http://YOUR_IP:9090 |
+| Grafana | 3001 | http://YOUR_IP:3001 |
 
 ---
 
-## Scaling
-
-### Scale up (if needed)
+## Updating Deployment
 
 ```bash
-fly scale vm shared-cpu-2x
-fly scale count 2
-```
+# Pull latest code
+cd airplane-agent
+git pull origin main
 
-### Add volumes
-
-```bash
-fly volumes create reroute_data --size 1
-```
-
----
-
-## Troubleshooting
-
-### View logs
-
-```bash
-fly logs
-```
-
-### Check status
-
-```bash
-fly status
-```
-
-### SSH into VM
-
-```bash
-fly ssh console
-```
-
-### Restart
-
-```bash
-fly restart
+# Rebuild and restart
+docker-compose down
+docker-compose build
+docker-compose up -d
 ```
 
 ---
@@ -138,13 +128,11 @@ fly restart
 
 | Resource | Free Tier | Cost |
 |----------|-----------|------|
-| VMs (3x) | 256MB each | $0 |
-| PostgreSQL | 1GB | $0 |
-| Redis | 256MB | $0 |
-| Bandwidth | 3GB/month | $0 |
+| Compute (4 cores, 24GB) | Always Free | $0 |
+| Block Storage (200GB) | Always Free | $0 |
+| Outbound Bandwidth | 10TB/month | $0 |
+| Public IP | Always Free | $0 |
 | **Total** | | **$0** |
-
-You'll use about $1-2/month of the $5 credit, so it's completely free!
 
 ---
 
@@ -172,8 +160,23 @@ npm run dev
 
 ---
 
+## Production Frontend Deployment
+
+Deploy frontend to Vercel (free):
+
+```bash
+# Install Vercel CLI
+npm i -g vercel
+
+# Deploy
+cd frontend
+vercel --prod
+```
+
+---
+
 ## Resources
 
-- [Fly.io Docs](https://fly.io/docs/)
-- [Fly.io Discord](https://fly.io/discord)
-- [Pricing](https://fly.io/pricing/)
+- [Oracle Cloud Free Tier](https://www.oracle.com/cloud/free/)
+- [OCI Documentation](https://docs.oracle.com/en-us/iaas/Content/Home.htm)
+- [Docker Docs](https://docs.docker.com/)
